@@ -49,6 +49,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+web = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
 ]
@@ -85,6 +89,7 @@ include = [
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
+    "nanobot/web/static/**/*",
 ]
 
 [tool.hatch.build.targets.wheel]

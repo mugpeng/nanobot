@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nanobot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        .message-content pre {
+            background: #1e293b;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            overflow-x: auto;
+            margin: 0.5rem 0;
+        }
+        .message-content code {
+            background: #1e293b;
+            padding: 0.125rem 0.375rem;
+            border-radius: 0.25rem;
+            font-size: 0.875em;
+        }
+        .message-content pre code {
+            background: transparent;
+            padding: 0;
+        }
+        .progress-line {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+        .typing-indicator span {
+            animation: blink 1.4s infinite both;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink {
+            0%, 100% { opacity: 0.2; }
+            50% { opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <h1 class="text-xl font-bold text-cyan-400">🐈 nanobot</h1>
+            <select id="sessionSelect" class="bg-slate-700 text-sm px-3 py-1 rounded border border-slate-600 focus:outline-none focus:border-cyan-500">
+                <option value="web:default">Default Session</option>
+            </select>
+            <button id="newSessionBtn" class="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded border border-slate-600">
+                + New
+            </button>
+        </div>
+        <div id="statusIndicator" class="text-xs text-slate-400 flex items-center gap-2">
+            <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+            Connected
+        </div>
+    </header>
+
+    <!-- Chat Container -->
+    <main id="chatContainer" class="flex-1 overflow-y-auto p-4 space-y-4 max-w-4xl mx-auto w-full">
+        <!-- Messages will be inserted here -->
+        <div class="text-center text-slate-500 py-20">
+            <p class="text-lg mb-2">👋 Welcome to nanobot</p>
+            <p class="text-sm">Send a message to start chatting</p>
+        </div>
+    </main>
+
+    <!-- Input Area -->
+    <footer class="bg-slate-800 border-t border-slate-700 p-4">
+        <div class="max-w-4xl mx-auto">
+            <form id="chatForm" class="flex gap-3">
+                <input
+                    type="text"
+                    id="messageInput"
+                    placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
+                    class="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-cyan-500 placeholder-slate-400"
+                    autocomplete="off"
+                >
+                <button
+                    type="submit"
+                    id="sendBtn"
+                    class="bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-600 disabled:cursor-not-allowed px-6 py-3 rounded-lg font-medium transition-colors"
+                >
+                    Send
+                </button>
+            </form>
+            <div class="flex gap-4 mt-2 text-xs text-slate-500">
+                <button id="clearBtn" class="hover:text-slate-300">Clear chat</button>
+                <span>/</span>
+                <button id="helpBtn" class="hover:text-slate-300">Help</button>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // State
+        let currentSession = 'web:default';
+        let eventSource = null;
+        let isProcessing = false;
+        let sessions = [];
+
+        // DOM Elements
+        const chatContainer = document.getElementById('chatContainer');
+        const chatForm = document.getElementById('chatForm');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const sessionSelect = document.getElementById('sessionSelect');
+        const newSessionBtn = document.getElementById('newSessionBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const helpBtn = document.getElementById('helpBtn');
+        const statusIndicator = document.getElementById('statusIndicator');
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSessions();
+            chatForm.addEventListener('submit', handleSubmit);
+            sessionSelect.addEventListener('change', handleSessionChange);
+            newSessionBtn.addEventListener('click', handleNewSession);
+            clearBtn.addEventListener('click', handleClear);
+            helpBtn.addEventListener('click', showHelp);
+            messageInput.focus();
+        });
+
+        // Load sessions
+        async function loadSessions() {
+            try {
+                const res = await fetch('/api/sessions');
+                const data = await res.json();
+                sessions = data.sessions || [];
+                updateSessionSelect();
+            } catch (err) {
+                console.error('Failed to load sessions:', err);
+            }
+        }
+
+        // Update session dropdown
+        function updateSessionSelect() {
+            const currentValue = sessionSelect.value;
+            sessionSelect.innerHTML = '';
+
+            const sessionIds = sessions.map(s => s.key || s.id);
+            if (!sessionIds.includes('web:default')) {
+                sessionIds.push('web:default');
+            }
+
+            sessionIds.forEach(id => {
+                const option = document.createElement('option');
+                option.value = id;
+                option.textContent = id.replace('web:', '');
+                if (id === currentValue) option.selected = true;
+                sessionSelect.appendChild(option);
+            });
+
+            if (!currentValue || !sessionIds.includes(currentValue)) {
+                sessionSelect.value = 'web:default';
+            }
+            currentSession = sessionSelect.value;
+        }
+
+        // Handle session change
+        async function handleSessionChange() {
+            currentSession = sessionSelect.value;
+            await loadSessionHistory();
+        }
+
+        // Load session history
+        async function loadSessionHistory() {
+            try {
+                const res = await fetch(`/api/sessions/${encodeURIComponent(currentSession)}`);
+                const data = await res.json();
+                chatContainer.innerHTML = '';
+
+                if (data.session && data.session.messages) {
+                    data.session.messages.forEach(msg => {
+                        if (msg.role === 'user') {
+                            appendMessage('user', msg.content);
+                        } else if (msg.role === 'assistant' && msg.content) {
+                            appendMessage('assistant', msg.content);
+                        }
+                    });
+                }
+
+                if (chatContainer.children.length === 0) {
+                    chatContainer.innerHTML = `
+                        <div class="text-center text-slate-500 py-20">
+                            <p class="text-lg mb-2">👋 Welcome to nanobot</p>
+                            <p class="text-sm">Send a message to start chatting</p>
+                        </div>
+                    `;
+                }
+                scrollToBottom();
+            } catch (err) {
+                console.error('Failed to load history:', err);
+            }
+        }
+
+        // Handle new session
+        function handleNewSession() {
+            const newId = `web:${Date.now()}`;
+            const option = document.createElement('option');
+            option.value = newId;
+            option.textContent = `session ${sessions.length + 1}`;
+            sessionSelect.appendChild(option);
+            sessionSelect.value = newId;
+            currentSession = newId;
+            chatContainer.innerHTML = `
+                <div class="text-center text-slate-500 py-20">
+                    <p class="text-lg mb-2">👋 New session</p>
+                    <p class="text-sm">Send a message to start chatting</p>
+                </div>
+            `;
+        }
+
+        // Handle form submit
+        async function handleSubmit(e) {
+            e.preventDefault();
+            const message = messageInput.value.trim();
+            if (!message || isProcessing) return;
+
+            // Remove welcome message if present
+            const welcome = chatContainer.querySelector('.text-center');
+            if (welcome) welcome.remove();
+
+            // Add user message
+            appendMessage('user', message);
+            messageInput.value = '';
+
+            // Send to server
+            await sendMessage(message);
+        }
+
+        // Send message to server
+        async function sendMessage(message) {
+            isProcessing = true;
+            sendBtn.disabled = true;
+            updateStatus('Processing...', 'yellow');
+
+            // Add thinking indicator
+            const thinkingId = 'thinking-' + Date.now();
+            appendThinking(thinkingId);
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: currentSession
+                    })
+                });
+
+                if (!response.ok) throw new Error('Failed to send message');
+
+                // Remove thinking indicator
+                removeThinking(thinkingId);
+
+                // Create assistant message container
+                const msgDiv = document.createElement('div');
+                msgDiv.className = 'flex gap-3 message-assistant';
+                msgDiv.id = 'response-' + thinkingId;
+                msgDiv.innerHTML = `
+                    <div class="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center text-sm font-bold flex-shrink-0">🐈</div>
+                    <div class="flex-1 message-content prose prose-invert max-w-none">
+                        <div class="typing-indicator text-slate-400">
+                            <span>●</span><span>●</span><span>●</span>
+                        </div>
+                    </div>
+                `;
+                chatContainer.appendChild(msgDiv);
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullResponse = '';
+                const contentDiv = msgDiv.querySelector('.message-content');
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('event:')) {
+                            const event = line.slice(6).trim();
+                            continue;
+                        }
+                        if (line.startsWith('data:')) {
+                            try {
+                                const data = JSON.parse(line.slice(5));
+                                if (data.content) {
+                                    contentDiv.innerHTML = marked.parse(data.content);
+                                    fullResponse = data.content;
+                                }
+                            } catch (e) {
+                                // Ignore parse errors for incomplete chunks
+                            }
+                        }
+                    }
+                    scrollToBottom();
+                }
+
+                await loadSessions();
+
+            } catch (err) {
+                removeThinking(thinkingId);
+                appendMessage('system', `Error: ${err.message}`);
+            } finally {
+                isProcessing = false;
+                sendBtn.disabled = false;
+                updateStatus('Connected', 'green');
+                messageInput.focus();
+            }
+        }
+
+        // Append message to chat
+        function appendMessage(role, content) {
+            const div = document.createElement('div');
+            div.className = `flex gap-3 message-${role}`;
+
+            if (role === 'user') {
+                div.innerHTML = `
+                    <div class="flex-1 text-right">
+                        <div class="inline-block bg-slate-700 rounded-lg px-4 py-2 max-w-[80%]">
+                            ${escapeHtml(content)}
+                        </div>
+                    </div>
+                    <div class="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center text-sm font-bold flex-shrink-0">👤</div>
+                `;
+            } else if (role === 'assistant') {
+                div.innerHTML = `
+                    <div class="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center text-sm font-bold flex-shrink-0">🐈</div>
+                    <div class="flex-1 message-content prose prose-invert max-w-none">
+                        ${marked.parse(content)}
+                    </div>
+                `;
+            } else {
+                div.innerHTML = `
+                    <div class="w-full text-center text-slate-500 text-sm py-2">
+                        ${escapeHtml(content)}
+                    </div>
+                `;
+            }
+
+            chatContainer.appendChild(div);
+            scrollToBottom();
+        }
+
+        // Append thinking indicator
+        function appendThinking(id) {
+            const div = document.createElement('div');
+            div.id = id;
+            div.className = 'flex gap-3';
+            div.innerHTML = `
+                <div class="w-8 h-8 rounded-full bg-cyan-600 flex items-center justify-center text-sm font-bold flex-shrink-0">🐈</div>
+                <div class="progress-line text-slate-400 text-sm py-1">Thinking...</div>
+            `;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+        }
+
+        // Remove thinking indicator
+        function removeThinking(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
+
+        // Handle clear chat
+        function handleClear() {
+            chatContainer.innerHTML = `
+                <div class="text-center text-slate-500 py-20">
+                    <p class="text-lg mb-2">👋 Chat cleared</p>
+                    <p class="text-sm">Send a message to start chatting</p>
+                </div>
+            `;
+        }
+
+        // Show help
+        function showHelp() {
+            const helpText = `
+                <strong>nanobot commands:</strong><br>
+                /new — Start a new conversation<br>
+                /stop — Stop the current task<br>
+                /help — Show available commands
+            `;
+            appendMessage('system', helpText);
+        }
+
+        // Update status indicator
+        function updateStatus(text, color) {
+            const colors = {
+                green: 'bg-green-500',
+                yellow: 'bg-yellow-500',
+                red: 'bg-red-500'
+            };
+            const dot = statusIndicator.querySelector('span');
+            dot.className = `w-2 h-2 ${colors[color]} rounded-full`;
+            statusIndicator.lastChild.textContent = ' ' + text;
+        }
+
+        // Scroll to bottom
+        function scrollToBottom() {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

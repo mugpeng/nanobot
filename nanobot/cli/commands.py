@@ -581,6 +581,32 @@ def gateway(
 
 
 # ============================================================================
+# Web Interface
+# ============================================================================
+
+
+@app.command()
+def web(
+    port: int = typer.Option(8000, "--port", "-p", help="Web server port"),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="Web server host"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Start the nanobot web interface."""
+    config = _load_runtime_config(config, workspace)
+    sync_workspace_templates(config.workspace_path)
+
+    try:
+        from nanobot.web.server import run_server
+    except ImportError:
+        console.print("[red]Error: web dependencies not installed.[/red]")
+        console.print("Install with: pip install nanobot[web]")
+        raise typer.Exit(1)
+
+    run_server(host=host, port=port)
+
+
+# ============================================================================
 # Agent Commands
 # ============================================================================
 
