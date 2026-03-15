@@ -183,6 +183,15 @@ class SessionManager:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
 
+    def delete_session(self, key: str) -> bool:
+        """Delete a session by key. Returns True if deleted."""
+        path = self._get_session_path(key)
+        if path.exists():
+            path.unlink()
+            self.invalidate(key)
+            return True
+        return False
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """
         List all sessions.

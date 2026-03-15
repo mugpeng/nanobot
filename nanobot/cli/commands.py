@@ -766,6 +766,26 @@ def agent(
         asyncio.run(run_interactive())
 
 
+@app.command()
+def web(
+    port: int = typer.Option(8000, "--port", "-p", help="Web server port"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Start the nanobot web interface."""
+    import uvicorn
+    from nanobot.web.server import init_agent
+    
+    config_obj = _load_runtime_config(config, workspace)
+    _print_deprecated_memory_window_notice(config_obj)
+    sync_workspace_templates(config_obj.workspace_path)
+    
+    # Initialize the global agent loop for the web server
+    init_agent(config_obj)
+    
+    console.print(f"{__logo__} Starting nanobot web interface on http://127.0.0.1:{port}")
+    uvicorn.run("nanobot.web.server:app", host="127.0.0.1", port=port, log_level="warning")
+
 # ============================================================================
 # Channel Commands
 # ============================================================================
@@ -1062,6 +1082,39 @@ def _login_github_copilot() -> None:
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
+
+
+# ============================================================================
+# Web Interface
+# ============================================================================
+
+
+@app.command()
+def web(
+    port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="Host to bind to"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Start the nanobot web interface."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]Web dependencies not installed.[/red]")
+        console.print("Run: [cyan]pip install nanobot-ai[web][/cyan]")
+        raise typer.Exit(1)
+
+    from nanobot.web.server import create_app
+
+    config_obj = _load_runtime_config(config, workspace)
+    _print_deprecated_memory_window_notice(config_obj)
+
+    web_app = create_app(config_obj)
+
+    console.print(f"{__logo__} Starting nanobot web interface on http://{host}:{port}")
+    console.print("  Press [bold]Ctrl+C[/bold] to stop\n")
+
+    uvicorn.run(web_app, host=host, port=port)
 
 
 if __name__ == "__main__":

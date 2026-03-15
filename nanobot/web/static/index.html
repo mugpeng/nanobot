@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nanobot Web UI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        /* Custom scrollbar for a cleaner look */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Markdown styling */
+        .prose pre { background-color: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; }
+        .prose code { background-color: #e2e8f0; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-size: 0.875em; }
+        .prose pre code { background-color: transparent; padding: 0; }
+        .prose p { margin-bottom: 1rem; }
+        .prose ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; }
+        .prose ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1rem; }
+        .prose a { color: #2563eb; text-decoration: underline; }
+    </style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col font-sans">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-200 px-6 py-4 flex justify-between items-center shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">n</div>
+            <h1 class="text-xl font-semibold text-gray-800">nanobot</h1>
+        </div>
+        <div class="flex items-center gap-4">
+            <select id="sessionSelect" class="bg-gray-100 border-none text-sm rounded-md px-3 py-1.5 focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="web:default">Default Session</option>
+            </select>
+            <button id="newSessionBtn" class="text-sm text-gray-500 hover:text-gray-800 transition-colors" title="Clear Session">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Chat Container -->
+    <main class="flex-1 overflow-y-auto p-6 flex flex-col gap-6" id="chatContainer">
+        <!-- Welcome Message -->
+        <div class="flex gap-4 max-w-3xl mx-auto w-full">
+            <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-1">
+                <span class="text-blue-600 text-sm font-bold">n</span>
+            </div>
+            <div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none px-5 py-4 shadow-sm text-gray-800 prose max-w-none">
+                <p>Hello! I'm nanobot. How can I help you today?</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Input Area -->
+    <footer class="bg-white border-t border-gray-200 p-4 shrink-0">
+        <div class="max-w-3xl mx-auto relative">
+            <form id="chatForm" class="flex items-end gap-2 bg-gray-100 rounded-2xl p-2 border border-gray-200 focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition-all">
+                <textarea 
+                    id="messageInput" 
+                    rows="1"
+                    class="w-full bg-transparent border-none focus:ring-0 resize-none px-3 py-2 text-gray-800 placeholder-gray-400 max-h-32 outline-none"
+                    placeholder="Message nanobot..."
+                    autofocus
+                ></textarea>
+                <button 
+                    type="submit" 
+                    id="sendBtn"
+                    class="bg-blue-600 hover:bg-blue-700 text-white rounded-xl p-2 h-10 w-10 flex items-center justify-center shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 transform rotate-90" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                    </svg>
+                </button>
+            </form>
+            <div class="text-center mt-2">
+                <span class="text-xs text-gray-400">nanobot can make mistakes. Check important info.</span>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const chatForm = document.getElementById('chatForm');
+        const messageInput = document.getElementById('messageInput');
+        const chatContainer = document.getElementById('chatContainer');
+        const sendBtn = document.getElementById('sendBtn');
+        const sessionSelect = document.getElementById('sessionSelect');
+        const newSessionBtn = document.getElementById('newSessionBtn');
+
+        let isGenerating = false;
+
+        // Auto-resize textarea
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+            if (this.value.trim() === '') {
+                this.style.height = 'auto';
+            }
+        });
+
+        // Handle Enter to send (Shift+Enter for new line)
+        messageInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (!isGenerating && this.value.trim() !== '') {
+                    chatForm.dispatchEvent(new Event('submit'));
+                }
+            }
+        });
+
+        function appendUserMessage(text) {
+            const div = document.createElement('div');
+            div.className = 'flex gap-4 max-w-3xl mx-auto w-full justify-end';
+            div.innerHTML = `
+                <div class="bg-blue-600 text-white rounded-2xl rounded-tr-none px-5 py-3 shadow-sm max-w-[85%] break-words">
+                    ${text.replace(/\n/g, '<br>')}
+                </div>
+            `;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+        }
+
+        function appendBotMessage() {
+            const div = document.createElement('div');
+            div.className = 'flex gap-4 max-w-3xl mx-auto w-full';
+            
+            const id = 'msg-' + Date.now();
+            
+            div.innerHTML = `
+                <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-1">
+                    <span class="text-blue-600 text-sm font-bold">n</span>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div id="${id}-status" class="text-xs text-gray-500 mb-1 hidden flex items-center gap-2">
+                        <svg class="animate-spin h-3 w-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="status-text">Thinking...</span>
+                    </div>
+                    <div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none px-5 py-4 shadow-sm text-gray-800 prose max-w-none">
+                        <div id="${id}-content" class="min-h-[1.5rem]">
+                            <span class="inline-block w-2 h-4 bg-gray-400 animate-pulse"></span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+            
+            return {
+                contentEl: document.getElementById(`${id}-content`),
+                statusEl: document.getElementById(`${id}-status`),
+                statusTextEl: document.querySelector(`#${id}-status .status-text`)
+            };
+        }
+
+        function scrollToBottom() {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function setGenerating(state) {
+            isGenerating = state;
+            sendBtn.disabled = state;
+            messageInput.disabled = state;
+            if (!state) {
+                messageInput.focus();
+            }
+        }
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const message = messageInput.value.trim();
+            if (!message || isGenerating) return;
+
+            const sessionId = sessionSelect.value;
+
+            // Reset input
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            
+            appendUserMessage(message);
+            const botEls = appendBotMessage();
+            setGenerating(true);
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message, session_id: sessionId })
+                });
+
+                if (!response.ok) throw new Error('Network response was not ok');
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        
+                        const [eventLine, dataLine] = line.split('\n');
+                        const event = eventLine.replace('event: ', '').trim();
+                        const dataStr = dataLine.replace('data: ', '').trim();
+                        
+                        if (!dataStr) continue;
+                        
+                        const data = JSON.parse(dataStr);
+
+                        if (event === 'tool') {
+                            botEls.statusEl.classList.remove('hidden');
+                            botEls.statusTextEl.textContent = `Using tool: ${data}`;
+                            scrollToBottom();
+                        } else if (event === 'thought') {
+                            botEls.statusEl.classList.remove('hidden');
+                            botEls.statusTextEl.textContent = `Thinking...`;
+                        } else if (event === 'message') {
+                            botEls.statusEl.classList.add('hidden');
+                            botEls.contentEl.innerHTML = marked.parse(data);
+                            scrollToBottom();
+                        } else if (event === 'error') {
+                            botEls.statusEl.classList.add('hidden');
+                            botEls.contentEl.innerHTML = `<span class="text-red-500">Error: ${data}</span>`;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                botEls.statusEl.classList.add('hidden');
+                botEls.contentEl.innerHTML = `<span class="text-red-500">Connection failed. Please try again.</span>`;
+            } finally {
+                setGenerating(false);
+            }
+        });
+
+        newSessionBtn.addEventListener('click', async () => {
+            if (!confirm('Clear current session history?')) return;
+            
+            const sessionId = sessionSelect.value;
+            try {
+                await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+                chatContainer.innerHTML = '';
+                const div = document.createElement('div');
+                div.className = 'flex gap-4 max-w-3xl mx-auto w-full';
+                div.innerHTML = `
+                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-1">
+                        <span class="text-blue-600 text-sm font-bold">n</span>
+                    </div>
+                    <div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none px-5 py-4 shadow-sm text-gray-800 prose max-w-none">
+                        <p>Session cleared. How can I help you?</p>
+                    </div>
+                `;
+                chatContainer.appendChild(div);
+            } catch (e) {
+                console.error('Failed to clear session', e);
+            }
+        });
+    </script>
+</body>
+</html>
