@@ -21,12 +21,11 @@ if sys.platform == "win32":
             pass
 
 import typer
-from prompt_toolkit import print_formatted_text
-from prompt_toolkit import PromptSession
+from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.formatted_text import ANSI, HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
-from prompt_toolkit.application import run_in_terminal
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
@@ -262,64 +261,47 @@ def main(
 
 
 @app.command()
-def onboard(
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-):
-    """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+def onboard():
+    """Initialize nanobot configuration and workspace with interactive wizard."""
+    from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
 
-    if config:
-        config_path = Path(config).expanduser().resolve()
-        set_config_path(config_path)
-        console.print(f"[dim]Using config: {config_path}[/dim]")
-    else:
-        config_path = get_config_path()
+    config_path = get_config_path()
 
-    def _apply_workspace_override(loaded: Config) -> Config:
-        if workspace:
-            loaded.agents.defaults.workspace = workspace
-        return loaded
-
-    # Create or update config
     if config_path.exists():
-        console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-        console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
-        console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
-        if typer.confirm("Overwrite?"):
-            config = _apply_workspace_override(Config())
-            save_config(config, config_path)
-            console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
-        else:
-            config = _apply_workspace_override(load_config(config_path))
-            save_config(config, config_path)
-            console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+        config = load_config()
     else:
-        config = _apply_workspace_override(Config())
-        save_config(config, config_path)
+        config = Config()
+        save_config(config)
         console.print(f"[green]✓[/green] Created config at {config_path}")
-    console.print("[dim]Config template now uses `maxTokens` + `contextWindowTokens`; `memoryWindow` is no longer a runtime setting.[/dim]")
+
+    # Run interactive wizard
+    from nanobot.cli.onboard_wizard import run_onboard
+
+    try:
+        config = run_onboard()
+        save_config(config)
+        console.print(f"[green]✓[/green] Config saved at {config_path}")
+    except Exception as e:
+        console.print(f"[red]✗[/red] Error during configuration: {e}")
+        console.print("[yellow]Please run 'nanobot onboard' again to complete setup.[/yellow]")
+        raise typer.Exit(1)
 
     _onboard_plugins(config_path)
 
-    # Create workspace, preferring the configured workspace path.
-    workspace = get_workspace_path(config.workspace_path)
+    # Create workspace
+    workspace = get_workspace_path()
+
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
 
     sync_workspace_templates(workspace)
 
-    agent_cmd = 'nanobot agent -m "Hello!"'
-    if config:
-        agent_cmd += f" --config {config_path}"
-
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print(f"  1. Add your API key to [cyan]{config_path}[/cyan]")
-    console.print("     Get one at: https://openrouter.ai/keys")
-    console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
+    console.print("  1. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
+    console.print("  2. Start gateway: [cyan]nanobot gateway[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
 
 
@@ -363,9 +345,9 @@ def _onboard_plugins(config_path: Path) -> None:
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
+    from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
-    from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
@@ -381,7 +363,6 @@ def _make_provider(config: Config):
             api_key=p.api_key if p else "no-key",
             api_base=config.get_api_base(model) or "http://localhost:8000/v1",
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
         )
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
     elif provider_name == "azure_openai":
